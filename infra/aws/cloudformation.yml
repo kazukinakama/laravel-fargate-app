@@ -61,3 +61,198 @@ Resources:
               }
             ]
           }
+
+#======================
+##### VPC作成 #####
+#======================
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 172.31.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: example-prod-main
+
+# インターネットゲートウェイ作成
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: example-prod-main
+
+# インターネットゲートウェイをVPCにアタッチする
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+# パブリックサブネット1を作成
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: 172.31.0.0/20
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: example-prod-main-public-subnet (AZ1)
+
+# パブリックサブネット2を作成
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      CidrBlock: 172.31.16.0/20
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: example-prod-main-public-subnet (AZ2)
+
+# プライベートサブネット1を作成
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      CidrBlock: 172.31.48.0/20
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: example-prod-main-private-subnet (AZ1)
+
+# プライベートサブネット2を作成
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      CidrBlock: 172.31.64.0/20
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: example-prod-main-private-subnet (AZ2)
+
+# ルートテーブル（パブリックサブネット用共通）作成
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: example-prod-main-public-routes
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+# ルートテーブル（プライベートサブネット用共通）作成
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: example-prod-main-private-routes
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet2
+
+#NATGatewayをパブリックサブネットに作成する
+  NatGatewayPublic1:
+    Type: AWS::EC2::NatGateway
+    DependsOn: EIP
+    Properties: 
+      AllocationId:
+          Fn::GetAtt:
+          - EIP
+          - AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+        Domain: vpc
+
+#NATGateway用のルーティングをプライベートサブネットのルートテーブルに追加する
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: NatGatewayPublic1
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayPublic1
+
+# セキュリティグループ（WEB）
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Web Security Group
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: example-prod-main-web-sg
+
+# セキュリティグループ（VPC）
+  VpcSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Vpc Security Group
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 172.31.0.0/16
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 0
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: example-prod-main-vpc-sg

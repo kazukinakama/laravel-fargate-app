@@ -1,0 +1,63 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: nakama_ec_api
+
+#======================
+# パラメーター
+#======================
+# Parameters:
+
+#======================
+# リソース
+#======================
+
+Resources:
+
+#======================
+##### ECR作成 #####
+#======================
+  NginxRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: example-prod-foobar-nginx
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Hold only 10 images, expire all others",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
+  PhpRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: example-prod-foobar-php
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Hold only 10 images, expire all others",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }

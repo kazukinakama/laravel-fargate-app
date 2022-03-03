@@ -14,53 +14,16 @@ Description: nakama_ec_api
 Resources:
 
 #======================
-##### ECR作成 #####
+##### ACM #####
 #======================
-  NginxRepository:
-    Type: AWS::ECR::Repository
+  ACM:
+    Type: AWS::CertificateManager::Certificate
     Properties:
-      RepositoryName: example-prod-foobar-nginx
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {
-            "rules": [
-              {
-                "rulePriority": 1,
-                "description": "Hold only 10 images, expire all others",
-                "selection": {
-                  "tagStatus": "any",
-                  "countType": "imageCountMoreThan",
-                  "countNumber": 10
-                },
-                "action": {
-                  "type": "expire"
-                }
-              }
-            ]
-          }
-
-  PhpRepository:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: example-prod-foobar-php
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {
-            "rules": [
-              {
-                "rulePriority": 1,
-                "description": "Hold only 10 images, expire all others",
-                "selection": {
-                  "tagStatus": "any",
-                  "countType": "imageCountMoreThan",
-                  "countNumber": 10
-                },
-                "action": {
-                  "type": "expire"
-                }
-              }
-            ]
-          }
+      DomainName: nakama-ec-api.click
+      DomainValidationOptions:
+        - DomainName: nakama-ec-api.click
+          HostedZoneId: Z06376351PERTY5W4JDAZ
+      ValidationMethod: DNS
 
 #======================
 ##### VPC作成 #####
@@ -256,3 +219,52 @@ Resources:
       Tags:
         - Key: Name
           Value: example-prod-main-vpc-sg
+
+# #======================
+# ##### ALB作成 #####
+# #======================
+#   ApplicationServiceTargetGroup:
+#     Type: AWS::ElasticLoadBalancingV2::TargetGroup
+#     Properties:
+#       Protocol: HTTP
+#       Port: 80
+#       VpcId: !Ref VPC
+#       TargetGroupAttributes:
+#         - Key: deregistration_delay.timeout_seconds
+#           Value: 30
+#   ApplicationLoadBalancerHttpListener:
+#     Type: AWS::ElasticLoadBalancingV2::Listener
+#     Properties:
+#       LoadBalancerArn: !Ref ApplicationLoadBalancer
+#       Protocol: HTTP
+#       Port: 80
+#       DefaultActions:
+#         - TargetGroupArn: !Ref ApplicationServiceTargetGroup
+#           Type: forward
+#   ApplicationLoadBalancerHttpsListener:
+#     Type: AWS::ElasticLoadBalancingV2::Listener
+#     Properties:
+#       LoadBalancerArn: !Ref ApplicationLoadBalancer
+#       Protocol: HTTPS
+#       Port: 443
+#       DefaultActions:
+#         - Type: redirect
+#       RedirectConfig:
+#         Port: 80
+#         Protocol: HTTP
+#   ApplicationLoadBalancer:
+#     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+#     Properties:
+#       Scheme: internet-facing
+#       Subnets:
+#         - !Ref PublicSubnet1
+#         - !Ref PublicSubnet2
+#       SecurityGroups:
+#         - !Ref WebSecurityGroup
+#         - !Ref VpcSecurityGroup
+#       LoadBalancerAttributes:
+#         - Key: idle_timeout.timeout_seconds
+#           Value : 30
+#       Tags:
+#         - Key: Name
+#           Value: !Sub ${AWS::StackName}-alb

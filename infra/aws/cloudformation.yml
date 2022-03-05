@@ -1,11 +1,77 @@
 AWSTemplateFormatVersion: "2010-09-09"
 
-Description: nakama_ec_api
+Description: example-prod-foobar
 
 #======================
 # パラメーター
 #======================
-# Parameters:
+Parameters:
+
+# プロジェクト名を入力する。各リソースのNameタグの値となる。
+  EnvironmentName:
+    Type: String
+    Default: example-prod-foobar
+
+# VPCのCIDRレンジ
+  VpcCIDR:
+    Type: String
+    Default: 172.31.0.0/16
+
+# パブリックサブネット1
+  PublicSubnet1CIDR:
+    Type: String
+    Default: 172.31.0.0/20
+
+# パブリックサブネット2
+  PublicSubnet2CIDR:
+    Type: String
+    Default: 172.31.16.0/20
+
+# プライベートサブネット1
+  PrivateSubnet1CIDR:
+    Type: String
+    Default: 172.31.48.0/20
+
+# プライベートサブネット2
+  PrivateSubnet2CIDR:
+    Type: String
+    Default: 172.31.64.0/20
+
+# ドメイン名を入力する
+  DomainName:
+    Type: String
+    Default: nakama-ec-api.click
+
+# Cluster名を入力する
+  ClusterName:
+    Type: String
+    Default: example-prod-foobar-cluster
+
+# データベースに接続するパスワードを入力する
+  DatabasePassword:
+    Type: String
+    NoEcho: "true"
+    Default: password
+
+# デプロイするコンテナイメージのタグを指定する。デフォルトはlatest.
+  ApplicationImageTag:
+    Type: String
+    Default: latest
+
+# キーペアの名前
+  Keypairname:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: nakama
+
+# ECSコンテナインスタンスの最新のAMIのIDを取得する
+  ApplicationImageId:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+
+#サービスが実行するタスクの数を指定する
+  DesiredCount:
+    Type: String
+    Default: 1
 
 #======================
 # リソース
@@ -14,29 +80,19 @@ Description: nakama_ec_api
 Resources:
 
 #======================
-##### ACM #####
+##### VPC #####
 #======================
-  ACM:
-    Type: AWS::CertificateManager::Certificate
-    Properties:
-      DomainName: nakama-ec-api.click
-      DomainValidationOptions:
-        - DomainName: nakama-ec-api.click
-          HostedZoneId: Z06376351PERTY5W4JDAZ
-      ValidationMethod: DNS
 
-#======================
-##### VPC作成 #####
-#======================
+# VPC作成
   VPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: 172.31.0.0/16
+      CidrBlock: !Ref VpcCIDR
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value: example-prod-main
+          Value: !Ref EnvironmentName
 
 # インターネットゲートウェイ作成
   InternetGateway:
@@ -44,7 +100,7 @@ Resources:
     Properties:
       Tags:
         - Key: Name
-          Value: example-prod-main
+          Value: !Ref EnvironmentName
 
 # インターネットゲートウェイをVPCにアタッチする
   InternetGatewayAttachment:
@@ -59,11 +115,11 @@ Resources:
     Properties:
       VpcId: !Ref VPC
       AvailabilityZone: !Select [ 0, !GetAZs '' ]
-      CidrBlock: 172.31.0.0/20
+      CidrBlock: !Ref PublicSubnet1CIDR
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: example-prod-main-public-subnet (AZ1)
+          Value: !Sub ${EnvironmentName}-public-subnet-1
 
 # パブリックサブネット2を作成
   PublicSubnet2:
@@ -71,11 +127,11 @@ Resources:
     Properties:
       VpcId: !Ref VPC
       AvailabilityZone: !Select [ 1, !GetAZs  '' ]
-      CidrBlock: 172.31.16.0/20
+      CidrBlock: !Ref PublicSubnet2CIDR
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: example-prod-main-public-subnet (AZ2)
+          Value: !Sub ${EnvironmentName}-public-subnet-2
 
 # プライベートサブネット1を作成
   PrivateSubnet1:
@@ -83,11 +139,11 @@ Resources:
     Properties:
       VpcId: !Ref VPC
       AvailabilityZone: !Select [ 0, !GetAZs  '' ]
-      CidrBlock: 172.31.48.0/20
+      CidrBlock: !Ref PrivateSubnet1CIDR
       MapPublicIpOnLaunch: false
       Tags:
         - Key: Name
-          Value: example-prod-main-private-subnet (AZ1)
+          Value: !Sub ${EnvironmentName}-private-subnet-1
 
 # プライベートサブネット2を作成
   PrivateSubnet2:
@@ -95,11 +151,11 @@ Resources:
     Properties:
       VpcId: !Ref VPC
       AvailabilityZone: !Select [ 1, !GetAZs  '' ]
-      CidrBlock: 172.31.64.0/20
+      CidrBlock: !Ref PrivateSubnet2CIDR
       MapPublicIpOnLaunch: false
       Tags:
         - Key: Name
-          Value: example-prod-main-private-subnet (AZ2)
+          Value: !Sub ${EnvironmentName}-private-subnet-2
 
 # ルートテーブル（パブリックサブネット用共通）作成
   PublicRouteTable:
@@ -108,8 +164,9 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: example-prod-main-public-routes
+          Value: !Sub ${EnvironmentName}-public-routes
 
+# ルートテーブル（パブリックサブネット用共通）にインターネットゲートウェイへのルートを作成
   DefaultPublicRoute:
     Type: AWS::EC2::Route
     DependsOn: InternetGatewayAttachment
@@ -118,12 +175,14 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
+# ルートテーブル（パブリックサブネット用共通）とパブリックサブネット1を紐付ける
   PublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref PublicRouteTable
       SubnetId: !Ref PublicSubnet1
 
+# ルートテーブル（パブリックサブネット用共通）とパブリックサブネット2を紐付ける
   PublicSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -137,37 +196,43 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: example-prod-main-private-routes
+          Value: !Sub ${EnvironmentName}-private-routes
 
+# ルートテーブル（プライベートサブネット用共通）とプライベートサブネット1を紐付ける
   PrivateSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref PrivateRouteTable
       SubnetId: !Ref PrivateSubnet1
 
+# ルートテーブル（プライベートサブネット用共通）とプライベートサブネット2を紐付ける
   PrivateSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref PrivateRouteTable
       SubnetId: !Ref PrivateSubnet2
 
-#NATGatewayをパブリックサブネットに作成する
+# NATGatewayをパブリックサブネットに作成
   NatGatewayPublic1:
     Type: AWS::EC2::NatGateway
     DependsOn: EIP
-    Properties: 
+    Properties:
       AllocationId:
           Fn::GetAtt:
           - EIP
           - AllocationId
       SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-nat-gateway-1
 
+# NATGateway用のElasticIPを作成
   EIP:
     Type: AWS::EC2::EIP
     Properties:
         Domain: vpc
 
-#NATGateway用のルーティングをプライベートサブネットのルートテーブルに追加する
+# ルートテーブル（プライベートサブネット用共通）にNATGatewayへのルートを作成
   PrivateRoute:
     Type: AWS::EC2::Route
     DependsOn: NatGatewayPublic1
@@ -176,10 +241,11 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref NatGatewayPublic1
 
-# セキュリティグループ（WEB）
+# セキュリティグループ（Web）
   WebSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
+      GroupName: !Sub ${EnvironmentName}-web
       GroupDescription: Web Security Group
       VpcId: !Ref VPC
       SecurityGroupIngress:
@@ -198,19 +264,20 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: example-prod-main-web-sg
+          Value: !Sub ${EnvironmentName}-web
 
 # セキュリティグループ（VPC）
   VpcSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Vpc Security Group
+      GroupName: !Sub ${EnvironmentName}-vpc
+      GroupDescription: VPC Security Group
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: -1
           FromPort: 0
           ToPort: 0
-          CidrIp: 172.31.0.0/16
+          CidrIp: !Ref VpcCIDR
       SecurityGroupEgress:
         - IpProtocol: -1
           FromPort: 0
@@ -218,53 +285,4 @@ Resources:
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: example-prod-main-vpc-sg
-
-# #======================
-# ##### ALB作成 #####
-# #======================
-#   ApplicationServiceTargetGroup:
-#     Type: AWS::ElasticLoadBalancingV2::TargetGroup
-#     Properties:
-#       Protocol: HTTP
-#       Port: 80
-#       VpcId: !Ref VPC
-#       TargetGroupAttributes:
-#         - Key: deregistration_delay.timeout_seconds
-#           Value: 30
-#   ApplicationLoadBalancerHttpListener:
-#     Type: AWS::ElasticLoadBalancingV2::Listener
-#     Properties:
-#       LoadBalancerArn: !Ref ApplicationLoadBalancer
-#       Protocol: HTTP
-#       Port: 80
-#       DefaultActions:
-#         - TargetGroupArn: !Ref ApplicationServiceTargetGroup
-#           Type: forward
-#   ApplicationLoadBalancerHttpsListener:
-#     Type: AWS::ElasticLoadBalancingV2::Listener
-#     Properties:
-#       LoadBalancerArn: !Ref ApplicationLoadBalancer
-#       Protocol: HTTPS
-#       Port: 443
-#       DefaultActions:
-#         - Type: redirect
-#       RedirectConfig:
-#         Port: 80
-#         Protocol: HTTP
-#   ApplicationLoadBalancer:
-#     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-#     Properties:
-#       Scheme: internet-facing
-#       Subnets:
-#         - !Ref PublicSubnet1
-#         - !Ref PublicSubnet2
-#       SecurityGroups:
-#         - !Ref WebSecurityGroup
-#         - !Ref VpcSecurityGroup
-#       LoadBalancerAttributes:
-#         - Key: idle_timeout.timeout_seconds
-#           Value : 30
-#       Tags:
-#         - Key: Name
-#           Value: !Sub ${AWS::StackName}-alb
+          Value: !Sub ${EnvironmentName}-vpc

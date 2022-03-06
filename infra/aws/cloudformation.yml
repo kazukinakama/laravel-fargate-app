@@ -79,6 +79,102 @@ Parameters:
 
 Resources:
 
+# #======================
+# ##### S3 #####
+# #======================
+
+# # ALBアクセスログ保存用S3バケット作成
+#   ALBAccessLogS3Bucket:
+#     Type: AWS::S3::Bucket
+#     Properties:
+#       BucketName: example-prod-foobar-alb-access-log-by-nakama
+#       BucketEncryption:
+#         ServerSideEncryptionConfiguration:
+#           - ServerSideEncryptionByDefault:
+#               SSEAlgorithm: AES256
+#       AccessControl: Private
+#       LifecycleConfiguration:
+#         Rules:
+#         - Id: LifeCycleRule
+#           Status: Enabled
+#           ExpirationInDays: 90
+#       Tags:
+#         - Key: Name
+#           Value: example-prod-foobar-alb-access-log-by-nakama
+
+# # ALBアクセスログ保存用S3バケットポリシー作成
+#   ALBAccessLogS3BucketPolicy:
+#     Type: AWS::S3::BucketPolicy
+#     Properties:
+#       Bucket: !Ref ALBAccessLogS3Bucket
+#       PolicyDocument: {
+#         "Version": "2012-10-17",
+#         "Statement": [
+#           {
+#             "Effect": "Allow",
+#             "Principal": {
+#               "AWS": "arn:aws:iam::142144853887:user/administrator"
+#             },
+#             "Action": "s3:PutObject",
+#             "Resource": "arn:aws:s3:::example-prod-foobar-alb-access-log-by-nakama/*"
+#           },
+#           {
+#             "Effect": "Allow",
+#             "Principal": {
+#               "Service": "delivery.logs.amazonaws.com"
+#             },
+#             "Action": "s3:PutObject",
+#             "Resource": "arn:aws:s3:::example-prod-foobar-alb-access-log-by-nakama/*",
+#             "Condition": {
+#               "StringEquals": {
+#                 "s3:x-amz-acl": "bucket-owner-full-control"
+#               }
+#             }
+#           },
+#           {
+#             "Effect": "Allow",
+#             "Principal": {
+#               "Service": "delivery.logs.amazonaws.com"
+#             },
+#             "Action": "s3:GetBucketAcl",
+#             "Resource": "arn:aws:s3:::example-prod-foobar-alb-access-log-by-nakama"
+#           },
+#         ]
+#       }
+
+#======================
+##### ACM #####
+#======================
+
+# 証明書作成
+  ACM:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: Z06376351PERTY5W4JDAZ
+      ValidationMethod: DNS
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-acm
+
+#======================
+##### Route53 #####
+#======================
+
+# 検証用のALIASレコード作成
+  Route53:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      AliasTarget:
+        DNSName: !Sub ${ApplicationLoadBalancer.DNSName}
+        EvaluateTargetHealth: true
+        HostedZoneId: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
+      Name: !Ref DomainName
+      Type: A
+      HostedZoneId: Z06376351PERTY5W4JDAZ
+
 #======================
 ##### VPC #####
 #======================
@@ -286,3 +382,62 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName}-vpc
+
+#======================
+##### ALB #####
+#======================
+
+# ALB作成
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${EnvironmentName}-alb
+      Scheme: internet-facing
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref WebSecurityGroup
+        - !Ref VpcSecurityGroup
+      # LoadBalancerAttributes:
+      #   - Key: access_logs.s3.enabled
+      #     Value : true
+      #   - Key: access_logs.s3.bucket
+      #     Value : !Ref ALBAccessLogS3Bucket
+      #   - Key: access_logs.s3.prefix
+      #     Value : example-prod-foobar-alb-access-log-by-nakama
+      Type: application
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-alb
+
+# ALBのリスナー作成(HTTPS)
+  ApplicationLoadBalancerHttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Certificates:
+        CertificateArn: !Ref ACM
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Protocol: HTTPS
+      Port: 443
+      SslPolicy: ELBSecurityPolicy-2016-08
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            ContentType: text/plain
+            MessageBody: Fixed response content.
+            StatusCode: 200
+
+# ALBのリスナー作成(HTTP)
+  ApplicationLoadBalancerHttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: 443
+            StatusCode: HTTP_301

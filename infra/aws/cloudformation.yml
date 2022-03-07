@@ -5,12 +5,18 @@ Description: example-prod-foobar
 #======================
 # パラメーター
 #======================
+
 Parameters:
 
-# プロジェクト名を入力する。各リソースのNameタグの値となる。
+# プロジェクト名を入力する。
   EnvironmentName:
     Type: String
-    Default: example-prod-foobar
+    Default: example-prod
+
+# サービス名を入力する。
+  ServiceName:
+    Type: String
+    Default: foobar
 
 # VPCのCIDRレンジ
   VpcCIDR:
@@ -42,32 +48,6 @@ Parameters:
     Type: String
     Default: nakama-ec-api.click
 
-# Cluster名を入力する
-  ClusterName:
-    Type: String
-    Default: example-prod-foobar-cluster
-
-# データベースに接続するパスワードを入力する
-  DatabasePassword:
-    Type: String
-    NoEcho: "true"
-    Default: password
-
-# デプロイするコンテナイメージのタグを指定する。デフォルトはlatest.
-  ApplicationImageTag:
-    Type: String
-    Default: latest
-
-# キーペアの名前
-  Keypairname:
-    Type: AWS::EC2::KeyPair::KeyName
-    Default: nakama
-
-# ECSコンテナインスタンスの最新のAMIのIDを取得する
-  ApplicationImageId:
-    Type: AWS::SSM::Parameter::Value<String>
-    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
-
 #サービスが実行するタスクの数を指定する
   DesiredCount:
     Type: String
@@ -79,85 +59,19 @@ Parameters:
 
 Resources:
 
-# #======================
-# ##### S3 #####
-# #======================
-
-# # ALBアクセスログ保存用S3バケット作成
-#   ALBAccessLogS3Bucket:
-#     Type: AWS::S3::Bucket
-#     Properties:
-#       BucketName: example-prod-foobar-alb-access-log-by-nakama
-#       BucketEncryption:
-#         ServerSideEncryptionConfiguration:
-#           - ServerSideEncryptionByDefault:
-#               SSEAlgorithm: AES256
-#       AccessControl: Private
-#       LifecycleConfiguration:
-#         Rules:
-#         - Id: LifeCycleRule
-#           Status: Enabled
-#           ExpirationInDays: 90
-#       Tags:
-#         - Key: Name
-#           Value: example-prod-foobar-alb-access-log-by-nakama
-
-# # ALBアクセスログ保存用S3バケットポリシー作成
-#   ALBAccessLogS3BucketPolicy:
-#     Type: AWS::S3::BucketPolicy
-#     Properties:
-#       Bucket: !Ref ALBAccessLogS3Bucket
-#       PolicyDocument: {
-#         "Version": "2012-10-17",
-#         "Statement": [
-#           {
-#             "Effect": "Allow",
-#             "Principal": {
-#               "AWS": "arn:aws:iam::142144853887:user/administrator"
-#             },
-#             "Action": "s3:PutObject",
-#             "Resource": "arn:aws:s3:::example-prod-foobar-alb-access-log-by-nakama/*"
-#           },
-#           {
-#             "Effect": "Allow",
-#             "Principal": {
-#               "Service": "delivery.logs.amazonaws.com"
-#             },
-#             "Action": "s3:PutObject",
-#             "Resource": "arn:aws:s3:::example-prod-foobar-alb-access-log-by-nakama/*",
-#             "Condition": {
-#               "StringEquals": {
-#                 "s3:x-amz-acl": "bucket-owner-full-control"
-#               }
-#             }
-#           },
-#           {
-#             "Effect": "Allow",
-#             "Principal": {
-#               "Service": "delivery.logs.amazonaws.com"
-#             },
-#             "Action": "s3:GetBucketAcl",
-#             "Resource": "arn:aws:s3:::example-prod-foobar-alb-access-log-by-nakama"
-#           },
-#         ]
-#       }
-
 #======================
 ##### ACM #####
 #======================
 
 # 証明書作成
-  ACM:
+  Root:
     Type: AWS::CertificateManager::Certificate
     Properties:
       DomainName: !Ref DomainName
-      DomainValidationOptions:
-        - DomainName: !Ref DomainName
-          HostedZoneId: Z06376351PERTY5W4JDAZ
       ValidationMethod: DNS
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-acm
+          Value: !Sub ${EnvironmentName}-nakama-ec-api-click
 
 #======================
 ##### Route53 #####
@@ -171,9 +85,190 @@ Resources:
         DNSName: !Sub ${ApplicationLoadBalancer.DNSName}
         EvaluateTargetHealth: true
         HostedZoneId: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
+      HostedZoneId: Z06376351PERTY5W4JDAZ
       Name: !Ref DomainName
       Type: A
-      HostedZoneId: Z06376351PERTY5W4JDAZ
+
+#======================
+#####  IAM #####
+#======================
+
+# タスク実行ロール作成
+  EcsTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-${ServiceName}-ecs-task-execution
+      AssumeRolePolicyDocument: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        }
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-${ServiceName}-ecs-task-execution
+
+# タスクロール作成
+  EcsTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-${ServiceName}-ecs-task
+      AssumeRolePolicyDocument: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        }
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-${ServiceName}-ecs-task
+
+# タスク実行ポリシー作成
+  EcsTaskExecutionPolicy:
+    Type: AWS::IAM::Policy
+    DependsOn: EcsTaskExecutionRole
+    Properties:
+      PolicyName: !Sub ${EnvironmentName}-${ServiceName}-ecs-task-execution
+      Roles:
+        - !Ref EcsTaskExecutionRole
+      PolicyDocument:
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecr:GetAuthorizationToken",
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              Resource: "*"
+            }
+          ]
+        }
+
+# パラメータ参照ポリシー作成
+  ssmPolicy:
+    Type: AWS::IAM::Policy
+    DependsOn: EcsTaskExecutionRole
+    Properties:
+      PolicyName: !Sub ${EnvironmentName}-${ServiceName}-ssm
+      Roles:
+        - !Ref EcsTaskExecutionRole
+      PolicyDocument:
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ssm:GetParameters",
+                "ssm:GetParameter",
+              ],
+              Resource: "*"
+            }
+          ]
+        }
+
+# タスクポリシー作成
+  EcsTaskSsmPolicy:
+    Type: AWS::IAM::Policy
+    DependsOn: EcsTaskRole
+    Properties:
+      PolicyName: ssm
+      Roles:
+        - !Ref EcsTaskRole
+      PolicyDocument:
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ssmmessages:CreateControlChannel",
+                "ssmmessages:CreateDataChannel",
+                "ssmmessages:OpenControlChannel",
+                "ssmmessages:OpenDataChannel",
+              ],
+              Resource: "*"
+            }
+          ]
+        }
+
+# #======================
+# #####  ECR #####
+# #======================
+
+# nginx用のECR作成
+  NginxRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}-${ServiceName}-nginx
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Hold only 10 images, expire all others",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-${ServiceName}-nginx
+
+# php用のECR作成
+  PhpRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}-${ServiceName}-php
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Hold only 10 images, expire all others",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-${ServiceName}-php
 
 #======================
 ##### VPC #####
@@ -188,7 +283,7 @@ Resources:
       EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value: !Ref EnvironmentName
+          Value: !Sub ${EnvironmentName}-main
 
 # インターネットゲートウェイ作成
   InternetGateway:
@@ -196,7 +291,7 @@ Resources:
     Properties:
       Tags:
         - Key: Name
-          Value: !Ref EnvironmentName
+          Value: !Sub ${EnvironmentName}-main
 
 # インターネットゲートウェイをVPCにアタッチする
   InternetGatewayAttachment:
@@ -209,49 +304,49 @@ Resources:
   PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref VPC
       AvailabilityZone: !Select [ 0, !GetAZs '' ]
       CidrBlock: !Ref PublicSubnet1CIDR
       MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-public-subnet-1
+          Value: !Sub ${EnvironmentName}-main-public-1
 
 # パブリックサブネット2を作成
   PublicSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref VPC
       AvailabilityZone: !Select [ 1, !GetAZs  '' ]
       CidrBlock: !Ref PublicSubnet2CIDR
       MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-public-subnet-2
+          Value: !Sub ${EnvironmentName}-main-public-2
 
 # プライベートサブネット1を作成
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref VPC
       AvailabilityZone: !Select [ 0, !GetAZs  '' ]
       CidrBlock: !Ref PrivateSubnet1CIDR
       MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-private-subnet-1
+          Value: !Sub ${EnvironmentName}-main-private-1
 
 # プライベートサブネット2を作成
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
-      VpcId: !Ref VPC
       AvailabilityZone: !Select [ 1, !GetAZs  '' ]
       CidrBlock: !Ref PrivateSubnet2CIDR
       MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-private-subnet-2
+          Value: !Sub ${EnvironmentName}-main-private-2
 
 # ルートテーブル（パブリックサブネット用共通）作成
   PublicRouteTable:
@@ -260,16 +355,16 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-public-routes
+          Value: !Sub ${EnvironmentName}-main-public
 
 # ルートテーブル（パブリックサブネット用共通）にインターネットゲートウェイへのルートを作成
-  DefaultPublicRoute:
+  InternetGatewayPublicRoute:
     Type: AWS::EC2::Route
     DependsOn: InternetGatewayAttachment
     Properties:
-      RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref PublicRouteTable
 
 # ルートテーブル（パブリックサブネット用共通）とパブリックサブネット1を紐付ける
   PublicSubnet1RouteTableAssociation:
@@ -285,6 +380,29 @@ Resources:
       RouteTableId: !Ref PublicRouteTable
       SubnetId: !Ref PublicSubnet2
 
+# NATGatewayをパブリックサブネットに作成
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    DependsOn: NATGatewayEIP1
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+        - NATGatewayEIP1
+        - AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-main-1
+
+# NATGateway用のElasticIPを作成
+  NATGatewayEIP1:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-nat-gateway-1
+
 # ルートテーブル（プライベートサブネット用共通）作成
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
@@ -292,7 +410,16 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-private-routes
+          Value: !Sub ${EnvironmentName}-main-private-1
+
+# ルートテーブル（プライベートサブネット用共通）にNATGatewayへのルートを作成
+  NATGatewayPrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: NatGateway1
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+      RouteTableId: !Ref PrivateRouteTable
 
 # ルートテーブル（プライベートサブネット用共通）とプライベートサブネット1を紐付ける
   PrivateSubnet1RouteTableAssociation:
@@ -308,80 +435,51 @@ Resources:
       RouteTableId: !Ref PrivateRouteTable
       SubnetId: !Ref PrivateSubnet2
 
-# NATGatewayをパブリックサブネットに作成
-  NatGatewayPublic1:
-    Type: AWS::EC2::NatGateway
-    DependsOn: EIP
-    Properties:
-      AllocationId:
-          Fn::GetAtt:
-          - EIP
-          - AllocationId
-      SubnetId: !Ref PublicSubnet1
-      Tags:
-        - Key: Name
-          Value: !Sub ${EnvironmentName}-nat-gateway-1
-
-# NATGateway用のElasticIPを作成
-  EIP:
-    Type: AWS::EC2::EIP
-    Properties:
-        Domain: vpc
-
-# ルートテーブル（プライベートサブネット用共通）にNATGatewayへのルートを作成
-  PrivateRoute:
-    Type: AWS::EC2::Route
-    DependsOn: NatGatewayPublic1
-    Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGatewayPublic1
-
 # セキュリティグループ（Web）
   WebSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub ${EnvironmentName}-web
-      GroupDescription: Web Security Group
+      GroupName: !Sub ${EnvironmentName}-main-web
+      GroupDescription: WebSecurityGroup
       VpcId: !Ref VPC
       SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
+        - FromPort: 80
           ToPort: 80
+          IpProtocol: tcp
           CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 443
+        - FromPort: 443
           ToPort: 443
+          IpProtocol: tcp
           CidrIp: 0.0.0.0/0
       SecurityGroupEgress:
-        - IpProtocol: -1
-          FromPort: 0
+        - FromPort: 0
           ToPort: 0
+          IpProtocol: -1
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-web
+          Value: !Sub ${EnvironmentName}-main-web
 
 # セキュリティグループ（VPC）
   VpcSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub ${EnvironmentName}-vpc
-      GroupDescription: VPC Security Group
+      GroupName: !Sub ${EnvironmentName}-main-vpc
+      GroupDescription: VpcSecurityGroup
       VpcId: !Ref VPC
       SecurityGroupIngress:
-        - IpProtocol: -1
-          FromPort: 0
+        - FromPort: 0
           ToPort: 0
+          IpProtocol: -1
           CidrIp: !Ref VpcCIDR
       SecurityGroupEgress:
-        - IpProtocol: -1
-          FromPort: 0
+        - FromPort: 0
           ToPort: 0
+          IpProtocol: -1
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-vpc
+          Value: !Sub ${EnvironmentName}-main-vpc
 
 #======================
 ##### ALB #####
@@ -391,53 +489,155 @@ Resources:
   ApplicationLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: !Sub ${EnvironmentName}-alb
+      Name: !Sub ${EnvironmentName}-nakama-ec-api-click
       Scheme: internet-facing
-      Subnets:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
       SecurityGroups:
         - !Ref WebSecurityGroup
         - !Ref VpcSecurityGroup
-      # LoadBalancerAttributes:
-      #   - Key: access_logs.s3.enabled
-      #     Value : true
-      #   - Key: access_logs.s3.bucket
-      #     Value : !Ref ALBAccessLogS3Bucket
-      #   - Key: access_logs.s3.prefix
-      #     Value : example-prod-foobar-alb-access-log-by-nakama
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
       Type: application
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-alb
+          Value: !Sub ${EnvironmentName}-nakama-ec-api-click
 
 # ALBのリスナー作成(HTTPS)
   ApplicationLoadBalancerHttpsListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       Certificates:
-        CertificateArn: !Ref ACM
+        - CertificateArn: !Ref Root
       LoadBalancerArn: !Ref ApplicationLoadBalancer
-      Protocol: HTTPS
       Port: 443
-      SslPolicy: ELBSecurityPolicy-2016-08
+      Protocol: HTTPS
       DefaultActions:
-        - Type: fixed-response
-          FixedResponseConfig:
-            ContentType: text/plain
-            MessageBody: Fixed response content.
-            StatusCode: 200
+        - Type: forward
+          TargetGroupArn: !Ref ApplicationServiceTargetGroup
 
 # ALBのリスナー作成(HTTP)
-  ApplicationLoadBalancerHttpsListener:
+  ApplicationLoadBalancerHttpListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       LoadBalancerArn: !Ref ApplicationLoadBalancer
-      Protocol: HTTP
       Port: 80
+      Protocol: HTTP
       DefaultActions:
         - Type: redirect
           RedirectConfig:
-            Protocol: HTTPS
             Port: 443
+            Protocol: HTTPS
             StatusCode: HTTP_301
+
+# ターゲットグループ作成
+  ApplicationServiceTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-foobar
+      Port: 80
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VPC
+      HealthyThresholdCount: 2
+      HealthCheckIntervalSeconds: 30
+      Matcher:
+        HttpCode: 200
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      UnhealthyThresholdCount: 2
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-foobar
+
+#======================
+##### ECS作成 #####
+#======================
+
+# ECSCluster作成
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${EnvironmentName}-${ServiceName}
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-${ServiceName}
+
+# タスク定義作成
+  ApplicationTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${EnvironmentName}-${ServiceName}
+      TaskRoleArn: !Ref EcsTaskRole
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Ref EcsTaskExecutionRole
+      Memory: 512
+      Cpu: 256
+      Volumes:
+        - Name: php-fpm-socket
+      ContainerDefinitions:
+        - Name: nginx
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EnvironmentName}-${ServiceName}-nginx:latest
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+          DependsOn:
+            - ContainerName: php
+              Condition: START
+          MountPoints:
+            - ContainerPath: /var/run/php-fpm
+              SourceVolume: php-fpm-socket
+        - Name: php
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EnvironmentName}-${ServiceName}-php:latest
+          Secrets:
+            - Name: APP_KEY
+              ValueFrom: /example/prod/foobar/APP_KEY
+          MountPoints:
+            - ContainerPath: /var/run/php-fpm
+              SourceVolume: php-fpm-socket
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-${ServiceName}
+
+# サービス作成
+  ApplicationService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ApplicationLoadBalancerHttpListener
+      - ApplicationLoadBalancerHttpsListener
+    Properties:
+      ServiceName: !Sub ${EnvironmentName}-${ServiceName}
+      Cluster: !Ref Cluster
+      CapacityProviderStrategy:
+        - CapacityProvider: FARGATE_SPOT
+          Base: 0
+          Weight: 1
+      PlatformVersion: 1.4.0
+      TaskDefinition: !Ref ApplicationTaskDefinition
+      DesiredCount: !Ref DesiredCount
+      LoadBalancers:
+        - ContainerName: nginx
+          ContainerPort: 80
+          TargetGroupArn: !Ref ApplicationServiceTargetGroup
+      HealthCheckGracePeriodSeconds: 60
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref VpcSecurityGroup
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+      EnableExecuteCommand: true
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-${ServiceName}

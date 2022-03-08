@@ -12,8 +12,7 @@ env:
   SERVICE_NAME: foobar
   
 jobs:
-  deploy:
-    name: Deploy app to AWS Fargate
+  build:
     runs-on: ubuntu-latest
 
     steps:
@@ -88,6 +87,11 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
       - name: Fill in the new nginx image ID in the Amazon ECS task definition
         id: container-def-nginx
         uses: aws-actions/amazon-ecs-render-task-definition@v1

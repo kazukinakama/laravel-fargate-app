@@ -88,26 +88,26 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
-      - name: Fill in the new image ID in the Amazon ECS task definition
-        id: task-def
+      - name: Fill in the new nginx image ID in the Amazon ECS task definition
+        id: container-def-nginx
         uses: aws-actions/amazon-ecs-render-task-definition@v1
-        env:
-          ECS_TASK_DEFINITION: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
         with:
-          task-definition: ${{ env.ECS_TASK_DEFINITION }}
-          containerDefinitions:
-            - container-name: ${{ nginx }}
-              image: ${{ steps.build-nginx-image.outputs.image }}
-            - container-name: ${{ php }}
-              image: ${{ steps.build-php-image.outputs.image }}
+          task-definition: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
+          container-name: nginx
+          image: ${{ steps.build-nginx-image.outputs.image }}
+
+      - name: Fill in the new php image ID in the Amazon ECS task definition
+        id: container-def-php
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ steps.container-def-nginx.outputs.task-definition }}
+          container-name: php
+          image: ${{ steps.build-php-image.outputs.image }}
 
       - name: Deploy Amazon ECS task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        env:
-          ECS_CLUSTER: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
-          ECS_SERVICE: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
         with:
-          task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: ${{ env.ECS_SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
+          task-definition: ${{ steps.container-def-php.outputs.task-definition }}
+          service: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
+          cluster: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
           wait-for-service-stability: true

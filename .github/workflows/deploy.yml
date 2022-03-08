@@ -96,7 +96,7 @@ jobs:
         id: container-def-nginx
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
+          task-definition: ${{ env.SYSTEM_NAME }}-prod-${{ env.SERVICE_NAME }}
           container-name: nginx
           image: ${{ steps.amazon-ecr-login.outputs.registry }}/${{ steps.build-nginx-image.outputs.image }}
 
@@ -112,6 +112,6 @@ jobs:
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
           task-definition: ${{ steps.container-def-php.outputs.task-definition }}
-          service: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
-          cluster: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
+          service: ${{ env.SYSTEM_NAME }}-prod-${{ env.SERVICE_NAME }}
+          cluster: ${{ env.SYSTEM_NAME }}-prod-${{ env.SERVICE_NAME }}
           wait-for-service-stability: true

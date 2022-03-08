@@ -1,4 +1,4 @@
-name: deploy
+name: Deploy to Amazon ECS
 
 on:
   push:
@@ -10,6 +10,9 @@ env:
   IMAGE_TAG: ${{ github.sha }}
   SYSTEM_NAME: example
   SERVICE_NAME: foobar
+  ECS_SERVICE: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
+  ECS_CLUSTER: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
+  ECS_TASK_DEFINITION: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
   
 jobs:
   deploy:
@@ -59,6 +62,7 @@ jobs:
         id: amazon-ecr-login
       
       - name: Push nginx image to ecr
+        id: build-nginx-image
         env:
           DOCKER_BUILDKIT: 1
           ECR_REGISTRY: ${{ steps.amazon-ecr-login.outputs.registry }}
@@ -73,6 +77,7 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
       - name: Push php image to ecr
+        id: build-php-image
         env:
           DOCKER_BUILDKIT: 1
           ECR_REGISTRY: ${{ steps.amazon-ecr-login.outputs.registry }}
@@ -85,3 +90,22 @@ jobs:
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      - name: Fill in the new image ID in the Amazon ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ env.ECS_TASK_DEFINITION }}
+          containerDefinitions:
+            - container-name: ${{ nginx }}
+              image: ${{ steps.build-nginx-image.outputs.image }}
+            - container-name: ${{ php }}
+              image: ${{ steps.build-php-image.outputs.image }}
+
+      - name: Deploy Amazon ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true

@@ -97,7 +97,7 @@ jobs:
         with:
           task-definition: task-definition.json
           container-name: nginx
-          image: ${{ steps.amazon-ecr-login.outputs.registry }}/${{ steps.build-nginx-image.outputs.image }}
+          image: ${{ steps.build-nginx-image.outputs.image }}
 
       - name: Fill in the new php image ID in the Amazon ECS task definition
         id: container-def-php
@@ -105,7 +105,7 @@ jobs:
         with:
           task-definition: ${{ steps.container-def-nginx.outputs.task-definition }}
           container-name: php
-          image: ${{ steps.amazon-ecr-login.outputs.registry }}/${{ steps.build-php-image.outputs.image }}
+          image: ${{ steps.build-php-image.outputs.image }}
 
       - name: Deploy Amazon ECS task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1

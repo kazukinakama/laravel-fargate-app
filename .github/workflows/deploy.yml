@@ -10,9 +10,6 @@ env:
   IMAGE_TAG: ${{ github.sha }}
   SYSTEM_NAME: example
   SERVICE_NAME: foobar
-  ECS_SERVICE: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
-  ECS_CLUSTER: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
-  ECS_TASK_DEFINITION: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
   
 jobs:
   deploy:
@@ -94,6 +91,8 @@ jobs:
       - name: Fill in the new image ID in the Amazon ECS task definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
+        env:
+          ECS_TASK_DEFINITION: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
         with:
           task-definition: ${{ env.ECS_TASK_DEFINITION }}
           containerDefinitions:
@@ -104,6 +103,9 @@ jobs:
 
       - name: Deploy Amazon ECS task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        env:
+          ECS_CLUSTER: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
+          ECS_SERVICE: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
           service: ${{ env.ECS_SERVICE }}
